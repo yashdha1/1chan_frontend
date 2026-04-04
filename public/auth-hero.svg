@@ -9,10 +9,8 @@
       <stop offset="100%" style="stop-color:#71717a;stop-opacity:0.08"/>
     </linearGradient>
   </defs>
-  <rect width="800" height="1200" fill="url(#g)"/>
-  <circle cx="180" cy="220" r="280" fill="url(#a)"/>
+  <rect width="800" height="1200" fill="#394e4a"/>
+  <circle cx="180" cy="220" r="280" fill="#afbebb"/>
   <circle cx="620" cy="900" r="340" fill="url(#a)"/>
-  <path d="M0 720 Q200 640 400 700 T800 680 V1200 H0 Z" fill="#27272a" opacity="0.5"/>
-  <line x1="120" y1="0" x2="120" y2="1200" stroke="#3f3f46" stroke-width="1" opacity="0.25"/>
-  <line x1="680" y1="0" x2="680" y2="1200" stroke="#3f3f46" stroke-width="1" opacity="0.25"/>
+  <path d="M0 720 Q200 640 400 700 T800 680 V1200 H0 Z" fill="#5e706d" opacity="0.5"/> 
 </svg>

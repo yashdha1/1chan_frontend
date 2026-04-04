@@ -18,11 +18,11 @@ export default function Navbar() {
   const q = query.trim().toLowerCase();
   const postResults = q
     ? MOCK_POSTS.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.content.toLowerCase().includes(q) ||
-          p.author.username.toLowerCase().includes(q)
-      ).slice(0, 5)
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        p.content.toLowerCase().includes(q) ||
+        p.author.username.toLowerCase().includes(q)
+    ).slice(0, 5)
     : [];
   const userResults = q
     ? MOCK_USERS.filter((u) => u.username.toLowerCase().includes(q)).slice(0, 3)
@@ -46,14 +46,15 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-zinc-800 bg-zinc-950/95 px-6 backdrop-blur">
-
-      {/* 1 · Logo */}
-      <Link
-        href="/home"
-        className="shrink-0 text-sm font-semibold uppercase tracking-[0.2em] text-zinc-100"
-      >
-        1chan
-      </Link>
+      <div>
+        <img src="/1chan.svg" alt="1chan logo" className="inline-block h-4 w-4 mr-1" />
+        <Link
+          href="/home"
+          className="shrink-0 text-sm font-semibold uppercase tracking-[0.2em] text-zinc-100"
+        >
+          1chan
+        </Link>
+      </div>
 
       <span className="h-4 w-px shrink-0 bg-zinc-800" />
 
@@ -61,11 +62,10 @@ export default function Navbar() {
       <Link
         href="/notifications"
         title="Activity"
-        className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
-          pathname === "/notifications"
+        className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${pathname === "/notifications"
             ? "bg-zinc-800 text-zinc-100"
             : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
-        }`}
+          }`}
       >
         <Bell size={17} />
         {UNREAD_COUNT > 0 && (
@@ -165,11 +165,10 @@ export default function Navbar() {
       <Link
         href={`/profile/${CURRENT_USER.id}`}
         title="Profile"
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all ${
-          pathname.startsWith("/profile")
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all ${pathname.startsWith("/profile")
             ? "bg-teal-500 text-zinc-950 ring-2 ring-teal-500 ring-offset-1 ring-offset-zinc-950"
             : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-        }`}
+          }`}
       >
         {CURRENT_USER.username[0].toUpperCase()}
       </Link>

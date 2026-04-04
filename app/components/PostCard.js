@@ -21,9 +21,9 @@ export default function PostCard({ post }) {
   }
 
   return (
-    <article className="flex gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-3 transition-colors hover:border-zinc-700">
+    <article className="flex gap-3 border border-zinc-800 bg-zinc-900 px-3 py-3 transition-colors hover:border-zinc-700">
       {/* Vote column */}
-      <div className="flex w-6 shrink-0 flex-col items-center gap-0.5 pt-0.5">
+      <div className="flex w-6 shrink-0 flex-col items-center gap-0.5 pt-1">
         <button
           onClick={() => castVote("up")}
           className={`rounded p-0.5 transition-colors hover:bg-zinc-800 ${
@@ -48,48 +48,47 @@ export default function PostCard({ post }) {
           <ArrowDown size={13} />
         </button>
       </div>
-
-      {/* Content */}
+ 
       <div className="min-w-0 flex-1">
-        {/* Meta */}
-        <p className="text-[10px] text-zinc-600">
-          <span className="font-medium text-teal-400/80">#{post.community.name}</span>
-          {" · "}
-          <Link
-            href={`/profile/${post.author.id}`}
-            className="transition-colors hover:text-zinc-400"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {post.author.username}
-          </Link>
-          {" · "}
-          {timeAgo(post.createdAt)}
-        </p>
+
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <Avatar src={post.author.avatar} username={post.author.username} size="xs" />
+          <p className="text-[10px] text-zinc-600">
+            <Link
+              href={`/profile/${post.author.id}`}
+              className="transition-colors hover:text-zinc-400 font-medium"
+              onClick={(e) => e.stopPropagation()}
+            >
+              @{post.author.username}
+            </Link>
+            <span className="font-medium text-teal-400/80"> #{post.community.name}</span>
+          </p>
+        </div>
 
         {/* Title */}
         <Link href={`/posts/${post.id}`}>
-          <h2 className="mt-0.5 text-sm font-semibold leading-snug text-zinc-200 transition-colors hover:text-teal-300">
+          <h2 className="mt-0.5 text-m font-semibold leading-snug text-zinc-200 transition-colors hover:text-teal-300 mb-2">
             {post.title}
           </h2>
         </Link>
 
         {/* Body preview */}
         {post.content && (
-          <p className="mt-0.5 line-clamp-1 text-xs leading-relaxed text-zinc-600">
+          <p className="mt-0.5 line-clamp-3 text-xs leading-relaxed text-zinc-600 ">
             {post.content}
           </p>
         )}
-
-        {/* Image thumbnail */}
         {post.imageLink && (
           <Link href={`/posts/${post.id}`} className="mt-2 block">
-            <div className="relative h-52 w-full overflow-hidden rounded-md bg-zinc-800">
-              {/* skeleton while loading */}
+            <div
+              className="relative w-full overflow-hidden rounded-md bg-zinc-900 flex items-center justify-center"
+              style={{ maxHeight: "80vh" }}
+            >
               {!imgLoaded && !imgError && (
-                <div className="absolute inset-0 animate-pulse bg-zinc-800" />
+                <div className="h-52 w-full animate-pulse bg-zinc-800" />
               )}
               {imgError ? (
-                <div className="flex h-full items-center justify-center gap-2 text-xs text-zinc-600">
+                <div className="flex h-32 items-center justify-center gap-2 text-xs text-zinc-600">
                   <ImageOff size={14} /> Image unavailable
                 </div>
               ) : (
@@ -98,9 +97,10 @@ export default function PostCard({ post }) {
                   alt={post.title}
                   onLoad={() => setImgLoaded(true)}
                   onError={() => setImgError(true)}
-                  className={`h-full w-full object-cover transition-opacity duration-300 ${
+                  className={`w-full object-contain transition-opacity duration-300 ${
                     imgLoaded ? "opacity-100" : "opacity-0"
                   }`}
+                  style={{ maxHeight: "80vh" }}
                 />
               )}
             </div>

@@ -3,9 +3,12 @@ import Link from "next/link";
 export default function Home() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-10 bg-zinc-950 px-6 text-zinc-100">
-      <div className="text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">1chan</h1>
-        <p className="mt-2 text-sm text-zinc-500"></p>
+      <div className="text-center selection:bg-green-900 selection:text-white">
+          <img src="/1chan.svg" alt="1chan logo" className="mx-auto mb-4" />
+          <h1 className="text-3xl font-semibold tracking-tight p-x-2">
+            welcome to 1chan
+          </h1>
+        <p className="mt-2 text-sm text-zinc-500 opacity-50">"smallest forum"</p>
       </div>
       <div className="flex w-full max-w-xs flex-col gap-2">
         <Link

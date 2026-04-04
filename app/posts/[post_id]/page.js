@@ -46,12 +46,12 @@ export default function PostPage({ params }) {
         <ArrowLeft size={13} /> Back
       </Link>
 
-      {/* ── Post ────────────────────────────────────────────── */}
+
       <article className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
         {/* Author row */}
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <Avatar username={post.author.username} size="md" />
+            <Avatar src={post.author.avatar} username={post.author.username} size="md" />
             <div>
               <Link
                 href={`/profile/${post.author.id}`}
@@ -212,7 +212,7 @@ function CommentItem({ comment, depth = 0 }) {
         style={depth > 0 ? { borderLeft: "2px solid rgb(63 63 70)" } : {}}
       >
         <div className="flex gap-2.5">
-          <Avatar username={comment.author.username} size="sm" />
+          <Avatar src={comment.author.avatar} username={comment.author.username} size="sm" />
           <div className="min-w-0 flex-1">
             {/* Header */}
             <div className="flex items-baseline gap-2">
