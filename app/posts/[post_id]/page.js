@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -11,28 +11,59 @@ import {
   ChevronDown,
   Reply,
 } from "lucide-react";
-import { MOCK_POSTS, MOCK_COMMENTS } from "@/lib/mockData";
+import { api, normalizePost, normalizeComment } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import Avatar from "../../components/Avatar";
 import { AUTH_FIELD_CLASS } from "@/lib/authUi";
 
 const COMMENTS_BATCH = 3;
 
-export default function PostPage({ params }) {
-  const post = MOCK_POSTS.find((p) => p.id === params.post_id) ?? MOCK_POSTS[0];
-  const allComments = MOCK_COMMENTS.filter((c) => c.postId === post.id);
-
-  const [score, setScore] = useState(post.likes);
-  const [voted, setVoted] = useState(false);
+export default function PostPage({ params: paramsPromise }) {
+  const { post_id } = use(paramsPromise);
+  const [post, setPost] = useState(null);
+  const [allComments, setAllComments] = useState([]);
+  const [score, setScore] = useState(0);
+  const [voted, setVoted] = useState(null); // null | "up"
   const [commentText, setCommentText] = useState("");
   const [visible, setVisible] = useState(COMMENTS_BATCH);
 
-  function toggleVote() {
-    setVoted((v) => {
-      setScore(v ? post.likes : post.likes + 1);
-      return !v;
-    });
+  useEffect(() => {
+    api.getPost(post_id)
+      .then((raw) => {
+        const p = normalizePost(raw);
+        setPost(p);
+        setScore(p.likes);
+      })
+      .catch((e) => console.error("Post:", e.message));
+    api.getComments(post_id)
+      .then((res) => setAllComments((Array.isArray(res) ? res : []).map(normalizeComment)))
+      .catch((e) => console.error("Comments:", e.message));
+  }, [post_id]);
+
+  async function submitComment() {
+    if (!commentText.trim()) return;
+    try {
+      const comment = await api.createComment({ post_id, body: commentText.trim() });
+      setAllComments((prev) => [normalizeComment(comment), ...prev]);
+      setCommentText("");
+    } catch {}
   }
+
+  function toggleVote() {
+    if (!post) return;
+    const isVoted = voted === "up";
+    if (isVoted) {
+      api.unlikePost(String(post.id)).catch(() => {});
+      setScore((s) => s - 1);
+      setVoted(null);
+    } else {
+      api.likePost(String(post.id)).catch(() => {});
+      setScore((s) => s + 1);
+      setVoted("up");
+    }
+  }
+
+  if (!post) return <div className="py-20 text-center text-xs text-zinc-600">Loading…</div>;
 
   const shown = allComments.slice(0, visible);
   const remaining = allComments.length - visible;
@@ -88,7 +119,7 @@ export default function PostPage({ params }) {
           <button
             onClick={toggleVote}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              voted
+              voted === "up"
                 ? "bg-teal-500/15 text-teal-400"
                 : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
             }`}
@@ -121,7 +152,7 @@ export default function PostPage({ params }) {
                 Cancel
               </button>
               <button
-                onClick={() => { console.log("Comment:", commentText); setCommentText(""); }}
+                onClick={submitComment}
                 className="rounded-md bg-zinc-100 px-4 py-1.5 text-xs font-medium text-zinc-950 transition-colors hover:bg-white"
               >
                 Comment
@@ -140,7 +171,7 @@ export default function PostPage({ params }) {
 
           <div className="flex flex-col gap-3">
             {shown.map((c) => (
-              <CommentItem key={c.id} comment={c} depth={0} />
+              <CommentItem key={c.id} comment={c} depth={0} postId={post_id} onReply={(nc) => setAllComments((prev) => [nc, ...prev])} />
             ))}
           </div>
 
@@ -185,7 +216,7 @@ function PostImage({ src, alt }) {
 }
 
 /* ── CommentItem ─────────────────────────────────────────────── */
-function CommentItem({ comment, depth = 0 }) {
+function CommentItem({ comment, depth = 0, postId, onReply }) {
   const [score, setScore] = useState(comment.likes);
   const [vote, setVote] = useState(null);
   const [repliesLoaded, setRepliesLoaded] = useState(false);
@@ -196,6 +227,11 @@ function CommentItem({ comment, depth = 0 }) {
     setVote((prev) => {
       const removing = prev === dir;
       setScore(removing ? comment.likes : comment.likes + (dir === "up" ? 1 : -1));
+      if (removing) {
+        api.unlikeComment(comment.id).catch(() => {});
+      } else {
+        api.likeComment(comment.id).catch(() => {});
+      }
       return removing ? null : dir;
     });
   }
@@ -296,7 +332,14 @@ function CommentItem({ comment, depth = 0 }) {
                 />
                 {replyText.trim() && (
                   <button
-                    onClick={() => { console.log("Reply:", replyText); setShowReply(false); setReplyText(""); }}
+                    onClick={async () => {
+                      try {
+                        const reply = await api.createComment({ post_id: postId, body: replyText.trim(), parent_id: comment.id });
+                        onReply?.(normalizeComment(reply));
+                      } catch {}
+                      setShowReply(false);
+                      setReplyText("");
+                    }}
                     className="shrink-0 rounded-md bg-zinc-100 px-2.5 py-1.5 text-xs font-medium text-zinc-950 transition-colors hover:bg-white"
                   >
                     Reply
@@ -318,7 +361,7 @@ function CommentItem({ comment, depth = 0 }) {
       {repliesLoaded && hasReplies && (
         <div className="ml-4 mt-1.5 flex flex-col gap-1.5 border-l border-zinc-800 pl-2">
           {comment.replies.map((r) => (
-            <CommentItem key={r.id} comment={r} depth={depth + 1} />
+            <CommentItem key={r.id} comment={r} depth={depth + 1} postId={postId} onReply={onReply} />
           ))}
         </div>
       )}

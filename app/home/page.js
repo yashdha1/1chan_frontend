@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Plus, X, Search, ChevronDown, Image, Tag } from "lucide-react";
-import { MOCK_POSTS, MOCK_USERS, MOCK_TAGS, CURRENT_USER } from "@/lib/mockData";
 import PostCard from "../components/PostCard";
 import { AUTH_FIELD_CLASS } from "@/lib/authUi";
-import { timeAgo } from "@/lib/utils";
 import Link from "next/link";
+import { api, normalizePost, uploadToCloudinary } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
 
 const PAGE_SIZE = 4;
 const FILTERS = [
@@ -26,18 +26,25 @@ export default function HomePage() {
 
   /* form state */
   const [form, setForm] = useState(EMPTY_FORM);
-  const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [tagQuery, setTagQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState([]);
   const [tagDropOpen, setTagDropOpen] = useState(false);
+
+  /* real data */
+  const [posts, setPosts] = useState([]);
+  const [tags, setTags] = useState([]);
+  const [searchedPosts, setSearchedPosts] = useState([]);
+  const searchedUsers = [];
 
   const fileInputRef = useRef(null);
   const tagInputRef = useRef(null);
   const filterRef = useRef(null);
   const adminSearchRef = useRef(null);
 
-  const isPrivileged = CURRENT_USER.role === "mod" || CURRENT_USER.role === "admin";
+  const user = useAuthStore((s) => s.user);
+  const isPrivileged = user?.role === "mod" || user?.role === "admin";
 
   /* close filter dropdown when clicking outside */
   useEffect(() => {
@@ -61,29 +68,42 @@ export default function HomePage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const sorted = useMemo(() => {
-    const posts = [...MOCK_POSTS];
-    if (filter === "latest") posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    return posts;
+  /* fetch feed */
+  useEffect(() => {
+    api.generateFeed(filter)
+      .then(async (res) => {
+        const ids = res.post_ids ?? [];
+        const results = await Promise.allSettled(ids.map((id) => api.getPost(String(id))));
+        const ok = results
+          .filter((r) => r.status === "fulfilled")
+          .map((r) => normalizePost(r.value));
+        setPosts(ok);
+      })
+      .catch((e) => { console.error("Feed:", e.message); setPosts([]); });
   }, [filter]);
 
+  /* fetch available tags */
+  useEffect(() => {
+    api.getTags()
+      .then((res) => setTags((res ?? []).map((t) => t.name)))
+      .catch(() => {});
+  }, []);
+
+  /* admin search */
+  useEffect(() => {
+    if (!adminSearch.trim()) { setSearchedPosts([]); return; }
+    const t = setTimeout(() => {
+      api.searchPosts(adminSearch.trim())
+        .then((res) => setSearchedPosts((res.items ?? []).slice(0, 5)))
+        .catch(() => setSearchedPosts([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [adminSearch]);
+
+  const sorted = posts;
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pagePosts = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  /* admin fast-search results */
-  const adminQ = adminSearch.trim().toLowerCase();
-  const searchedPosts = adminQ
-    ? MOCK_POSTS.filter(
-        (p) =>
-          p.title.toLowerCase().includes(adminQ) ||
-          p.content.toLowerCase().includes(adminQ) ||
-          p.author.username.toLowerCase().includes(adminQ)
-      ).slice(0, 5)
-    : [];
-  const searchedUsers = adminQ
-    ? MOCK_USERS.filter((u) => u.username.toLowerCase().includes(adminQ)).slice(0, 4)
-    : [];
-  const hasAdminResults = searchedPosts.length > 0 || searchedUsers.length > 0;
+  const hasAdminResults = searchedPosts.length > 0;
 
   function changeFilter(f) {
     setFilter(f);
@@ -112,12 +132,11 @@ export default function HomePage() {
 
   function clearImage() {
     if (imagePreview) URL.revokeObjectURL(imagePreview);
-    setImageFile(null);
     setImagePreview(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const tagSuggestions = MOCK_TAGS.filter(
+  const tagSuggestions = tags.filter(
     (t) => tagQuery && t.toLowerCase().includes(tagQuery.toLowerCase()) && !selectedTags.includes(t)
   ).slice(0, 6);
 
@@ -133,10 +152,25 @@ export default function HomePage() {
     setSelectedTags((p) => p.filter((t) => t !== tag));
   }
 
-  function handlePost(e) {
+  async function handlePost(e) {
     e.preventDefault();
-    console.log("Create post", { ...form, tags: selectedTags, imageFile });
-    closeModal();
+    try {
+      let image_link = null;
+      if (imageFile) {
+        const result = await uploadToCloudinary(imageFile, crypto.randomUUID());
+        image_link = result.secure_url;
+      }
+      const newPost = await api.createPost({
+        title: form.title,
+        body: form.content,
+        image_link,
+        tags: selectedTags.length > 0 ? selectedTags : ["general"],
+      });
+      setPosts((prev) => [normalizePost(newPost), ...prev]);
+      closeModal();
+    } catch (err) {
+      console.error("Create post failed:", err.message);
+    }
   }
 
   const activeFilter = FILTERS.find((f) => f.id === filter);
@@ -166,7 +200,7 @@ export default function HomePage() {
           )}
 
           {/* Results dropdown */}
-          {adminSearchOpen && adminQ && (
+          {adminSearchOpen && adminSearch.trim() && (
             <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900 shadow-xl">
               {!hasAdminResults && (
                 <p className="px-3 py-3 text-xs text-zinc-600">No results for &ldquo;{adminSearch}&rdquo;</p>
@@ -179,15 +213,12 @@ export default function HomePage() {
                   </p>
                   {searchedPosts.map((p) => (
                     <Link
-                      key={p.id}
-                      href={`/posts/${p.id}`}
+                      key={p.post_id}
+                      href={`/posts/${p.post_id}`}
                       onClick={() => { setAdminSearch(""); setAdminSearchOpen(false); }}
                       className="flex flex-col px-3 py-2 transition-colors hover:bg-zinc-800"
                     >
                       <span className="truncate text-xs text-zinc-300">{p.title}</span>
-                      <span className="text-[10px] text-zinc-600">
-                        {p.author.username} · {timeAgo(p.createdAt)}
-                      </span>
                     </Link>
                   ))}
                 </>

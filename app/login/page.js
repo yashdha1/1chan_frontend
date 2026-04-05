@@ -53,7 +53,8 @@ export default function LoginPage() {
               autoComplete="username"
               value={form.username}
               onChange={handleChange}
-              placeholder="username"
+              placeholder="yourusername"
+
               className={AUTH_FIELD_CLASS}
             />
           </div>
@@ -95,3 +96,4 @@ export default function LoginPage() {
     </AuthSplitLayout>
   );
 }
+

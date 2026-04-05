@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowUp, ArrowDown, MessageSquare, ImageOff } from "lucide-react";
 import { timeAgo } from "@/lib/utils";
 import Avatar from "./Avatar";
+import { api } from "@/lib/api";
 
 export default function PostCard({ post }) {
   const [score, setScore] = useState(post.likes);
@@ -15,7 +16,13 @@ export default function PostCard({ post }) {
   function castVote(dir) {
     setVote((prev) => {
       const removing = prev === dir;
-      setScore(removing ? post.likes : post.likes + (dir === "up" ? 1 : -1));
+      const newScore = removing ? post.likes : post.likes + (dir === "up" ? 1 : -1);
+      setScore(newScore);
+      if (removing) {
+        api.unlikePost(String(post.id)).catch(() => {});
+      } else {
+        api.likePost(String(post.id)).catch(() => {});
+      }
       return removing ? null : dir;
     });
   }

@@ -1,20 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { MOCK_NOTIFICATIONS } from "@/lib/mockData";
+import { useState, useEffect } from "react";
+import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 
 export default function NotificationsPage() {
-  const [items, setItems] = useState(MOCK_NOTIFICATIONS);
+  const [items, setItems] = useState([]);
 
-  const unreadCount = items.filter((n) => !n.read).length;
+  useEffect(() => {
+    api.getNotifications(0)
+      .then((res) => setItems(res ?? []))
+      .catch(() => {});
+  }, []);
 
-  function markAllRead() {
-    setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+  const unreadCount = items.filter((n) => !n.is_read || n.is_read === "false").length;
+
+  async function markAllRead() {
+    const unread = items.filter((n) => !n.is_read || n.is_read === "false");
+    await Promise.allSettled(unread.map((n) => api.markRead(n.id)));
+    setItems((prev) => prev.map((n) => ({ ...n, is_read: "true" })));
   }
 
   function markRead(id) {
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    api.markRead(id).catch(() => {});
+    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: "true" } : n)));
   }
 
   return (
@@ -39,28 +48,34 @@ export default function NotificationsPage() {
       </div>
 
       <ul className="flex flex-col">
-        {items.map((n) => (
+        {items.map((n) => {
+          const isRead = n.is_read === "true" || n.is_read === true;
+          const text = n.body
+            ? `${n.publisher_name} commented: ${n.body}`
+            : `${n.publisher_name} ${n.type}d your post "${n.post_title}"`;
+          return (
           <li
             key={n.id}
             onClick={() => markRead(n.id)}
             className={`flex cursor-pointer items-center gap-3 border-b border-zinc-800/60 py-3 transition-colors last:border-0 hover:bg-zinc-900/40 ${
-              n.read ? "opacity-50" : ""
+              isRead ? "opacity-50" : ""
             }`}
           >
             {/* Unread dot */}
             <span className="flex w-4 shrink-0 items-center justify-center">
-              {!n.read && <span className="h-1.5 w-1.5 rounded-full bg-teal-400" />}
+              {!isRead && <span className="h-1.5 w-1.5 rounded-full bg-teal-400" />}
             </span>
 
             {/* Text */}
-            <p className={`flex-1 min-w-0 truncate text-sm ${n.read ? "text-zinc-500" : "text-zinc-300"}`}>
-              {n.text}
+            <p className={`flex-1 min-w-0 truncate text-sm ${isRead ? "text-zinc-500" : "text-zinc-300"}`}>
+              {text}
             </p>
 
             {/* Time */}
-            <span className="shrink-0 text-xs text-zinc-600">{timeAgo(n.createdAt)}</span>
+            <span className="shrink-0 text-xs text-zinc-600">{timeAgo(n.created_at)}</span>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );

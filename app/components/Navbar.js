@@ -4,30 +4,38 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Search, X, LogOut } from "lucide-react";
-import { MOCK_NOTIFICATIONS, MOCK_POSTS, MOCK_USERS, CURRENT_USER } from "@/lib/mockData";
-import { timeAgo } from "@/lib/utils";
-
-const UNREAD_COUNT = MOCK_NOTIFICATIONS.filter((n) => !n.read).length;
+import { useAuthStore } from "@/store/authStore";
+import { api } from "@/lib/api";
 
 export default function Navbar() {
   const pathname = usePathname();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [postResults, setPostResults] = useState([]);
+  const [mounted, setMounted] = useState(false);
   const searchRef = useRef(null);
 
-  const q = query.trim().toLowerCase();
-  const postResults = q
-    ? MOCK_POSTS.filter(
-      (p) =>
-        p.title.toLowerCase().includes(q) ||
-        p.content.toLowerCase().includes(q) ||
-        p.author.username.toLowerCase().includes(q)
-    ).slice(0, 5)
-    : [];
-  const userResults = q
-    ? MOCK_USERS.filter((u) => u.username.toLowerCase().includes(q)).slice(0, 3)
-    : [];
-  const hasResults = postResults.length > 0 || userResults.length > 0;
+  const user = useAuthStore((s) => s.user);
+  const rehydrate = useAuthStore((s) => s.rehydrate);
+  const logout = useAuthStore((s) => s.logout);
+
+  useEffect(() => {
+    rehydrate();
+    setMounted(true);
+  }, [rehydrate]);
+
+  const userResults = [];
+  const hasResults = postResults.length > 0;
+
+  useEffect(() => {
+    if (!query.trim()) { setPostResults([]); return; }
+    const t = setTimeout(() => {
+      api.searchPosts(query.trim())
+        .then((res) => setPostResults((res.items ?? []).slice(0, 5)))
+        .catch(() => setPostResults([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query]);
 
   useEffect(() => {
     function handle(e) {
@@ -68,11 +76,6 @@ export default function Navbar() {
           }`}
       >
         <Bell size={17} />
-        {UNREAD_COUNT > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-teal-500 px-1 text-[9px] font-bold leading-none text-zinc-950">
-            {UNREAD_COUNT}
-          </span>
-        )}
       </Link>
 
       <span className="h-4 w-px shrink-0 bg-zinc-800" />
@@ -98,7 +101,7 @@ export default function Navbar() {
         )}
 
         {/* Results dropdown */}
-        {open && q && (
+        {open && query && (
           <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900 shadow-xl">
             {!hasResults && (
               <p className="px-3 py-3 text-xs text-zinc-600">No results for &ldquo;{query}&rdquo;</p>
@@ -111,15 +114,12 @@ export default function Navbar() {
                 </p>
                 {postResults.map((p) => (
                   <Link
-                    key={p.id}
-                    href={`/posts/${p.id}`}
+                    key={p.post_id}
+                    href={`/posts/${p.post_id}`}
                     onClick={clearSearch}
                     className="flex flex-col px-3 py-2 transition-colors hover:bg-zinc-800"
                   >
                     <span className="truncate text-xs text-zinc-300">{p.title}</span>
-                    <span className="text-[10px] text-zinc-600">
-                      {p.author.username} · {timeAgo(p.createdAt)}
-                    </span>
                   </Link>
                 ))}
               </>
@@ -138,7 +138,7 @@ export default function Navbar() {
                     className="flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-zinc-800"
                   >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-300">
-                      {u.username[0].toUpperCase()}
+                      {u.avatar ? <img src={u.avatar} alt={u.username} className="h-6 w-6 rounded-full" /> : u.username[0].toUpperCase()}
                     </span>
                     <span className="text-xs text-zinc-300">{u.username}</span>
                     <span className="ml-auto text-[10px] text-zinc-600">{u.role}</span>
@@ -163,19 +163,25 @@ export default function Navbar() {
 
       {/* 4 · Profile */}
       <Link
-        href={`/profile/${CURRENT_USER.id}`}
+        href={mounted ? `/profile/${user?.username ?? "me"}` : "/profile/me"}
         title="Profile"
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all ${pathname.startsWith("/profile")
-            ? "bg-teal-500 text-zinc-950 ring-2 ring-teal-500 ring-offset-1 ring-offset-zinc-950"
-            : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all overflow-hidden ${pathname.startsWith("/profile")
+            ? "ring-2 ring-teal-500 ring-offset-1 ring-offset-zinc-950"
+            : "hover:ring-2 hover:ring-zinc-600 hover:ring-offset-1 hover:ring-offset-zinc-950"
           }`}
       >
-        {CURRENT_USER.username[0].toUpperCase()}
+        {mounted && user?.avatar ? (
+          <img src={user.avatar} alt={user.username} className="h-8 w-8 rounded-full object-cover" />
+        ) : (
+          <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${pathname.startsWith("/profile") ? "bg-teal-500 text-zinc-950" : "bg-zinc-800 text-zinc-300"}`}>
+            {mounted ? (user?.username?.[0] ?? "?").toUpperCase() : "?"}
+          </span>
+        )}
       </Link>
 
       {/* 5 · Logout */}
       <button
-        onClick={() => console.log("logout")}
+        onClick={logout}
         title="Log out"
         className="shrink-0 rounded-md p-1.5 text-zinc-600 transition-colors hover:bg-zinc-900 hover:text-zinc-400"
       >

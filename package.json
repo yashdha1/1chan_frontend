@@ -11,9 +11,11 @@
   "dependencies": {
     "@emotion/cache": "^11.14.0",
     "@mui/material-nextjs": "^7.3.9",
+    "axios": "^1.14.0",
     "install": "^0.13.0",
     "lucide-react": "^1.7.0",
-    "next": "16.2.1", 
+    "next": "16.2.1",
+    "next-cloudinary": "^6.17.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "zustand": "^5.0.12"

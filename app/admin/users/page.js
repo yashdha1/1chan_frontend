@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import { Search, SlidersHorizontal, ChevronDown, Shield, User } from "lucide-react";
-import { MOCK_USERS, communitiesByUser } from "@/lib/mockData";
+import { api } from "@/lib/api";
 import Avatar from "../../components/Avatar";
 
 const ROLE_BADGE = {
@@ -15,18 +14,50 @@ const ROLE_BADGE = {
 const ROLE_ORDER = { admin: 0, mod: 1, user: 2 };
 
 export default function AdminUsersPage() {
+  const [allUsers, setAllUsers] = useState([]);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
-  const [selectedId, setSelectedId] = useState(MOCK_USERS[0].id);
+  const [selectedId, setSelectedId] = useState(null);
+  const [actionError, setActionError] = useState("");
 
-  const filtered = MOCK_USERS.filter((u) => {
-    const matchesQuery = u.username.toLowerCase().includes(query.toLowerCase());
+  useEffect(() => {
+    api.getUsers("all")
+      .then((res) => {
+        setAllUsers(res ?? []);
+        if (res?.length > 0) setSelectedId(res[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function changeRole(userId, newRole) {
+    setActionError("");
+    try {
+      const updated = await api.updateUserRole(userId, newRole);
+      setAllUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: updated.role } : u)));
+    } catch (e) {
+      setActionError(e.message ?? "Failed to update role.");
+    }
+  }
+
+  async function removeUser(userId) {
+    setActionError("");
+    try {
+      await api.deleteUser(userId);
+      setAllUsers((prev) => prev.filter((u) => u.id !== userId));
+      setSelectedId(null);
+    } catch (e) {
+      setActionError(e.message ?? "Failed to delete user.");
+    }
+  }
+
+  const filtered = allUsers.filter((u) => {
+    const matchesQuery = u.email.toLowerCase().includes(query.toLowerCase());
     const matchesRole = roleFilter === "all" || u.role === roleFilter;
     return matchesQuery && matchesRole;
   }).sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]);
 
-  const selected = MOCK_USERS.find((u) => u.id === selectedId);
+  const selected = allUsers.find((u) => u.id === selectedId);
 
   return (
     <div className="flex flex-1" style={{ height: "calc(100vh - 3.5rem)" }}>
@@ -74,7 +105,6 @@ export default function AdminUsersPage() {
             <li className="p-4 text-center text-xs text-zinc-600">No users found.</li>
           )}
           {filtered.map((u) => {
-            const communities = communitiesByUser(u.id);
             const isExpanded = expandedId === u.id;
             const isSelected = selectedId === u.id;
             return (
@@ -88,9 +118,9 @@ export default function AdminUsersPage() {
                     isSelected ? "bg-zinc-900" : "hover:bg-zinc-900/50"
                   }`}
                 >
-                  <Avatar username={u.username} size="sm" />
+                  <Avatar username={u.email} size="sm" />
                   <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm text-zinc-200">{u.username}</p>
+                    <p className="truncate text-sm text-zinc-200">{u.email}</p>
                     <span
                       className={`mt-0.5 inline-block rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide ${ROLE_BADGE[u.role]}`}
                     >
@@ -103,22 +133,10 @@ export default function AdminUsersPage() {
                   />
                 </button>
 
-                {/* Expanded: communities */}
+                {/* Expanded: id */}
                 {isExpanded && (
                   <div className="border-t border-zinc-800/60 bg-zinc-950/50 px-4 py-2.5">
-                    <p className="mb-1.5 text-[10px] text-zinc-600 uppercase tracking-[0.15em]">
-                      Communities
-                    </p>
-                    <ul className="flex flex-wrap gap-1.5">
-                      {communities.map((c) => (
-                        <li
-                          key={c.id}
-                          className="rounded-full border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-400"
-                        >
-                          # {c.name}
-                        </li>
-                      ))}
-                    </ul>
+                    <p className="text-[10px] text-zinc-600">{String(u.id)}</p>
                   </div>
                 )}
               </li>
@@ -133,28 +151,22 @@ export default function AdminUsersPage() {
           <div className="mx-auto max-w-md">
             <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-6">
               <div className="flex items-start gap-4">
-                <Avatar username={selected.username} size="lg" />
+                <Avatar username={selected.email} size="lg" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <Link
-                      href={`/profile/${selected.id}`}
-                      className="text-base font-semibold text-zinc-100 hover:underline"
-                    >
-                      {selected.username}
-                    </Link>
+                    <p className="text-base font-semibold text-zinc-100">{selected.email}</p>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${ROLE_BADGE[selected.role]}`}
                     >
                       {selected.role}
                     </span>
                   </div>
-                  {selected.bio ? (
-                    <p className="mt-1 text-sm text-zinc-500">{selected.bio}</p>
-                  ) : (
-                    <p className="mt-1 text-sm text-zinc-700 italic">No bio.</p>
-                  )}
+                  <p className="mt-1 text-xs text-zinc-600 font-mono">{selected.id}</p>
+                  <p className="mt-0.5 text-xs text-zinc-600">{selected.is_active ? "Active" : "Inactive"}</p>
                 </div>
               </div>
+
+              {actionError && <p className="mt-3 text-xs text-red-400">{actionError}</p>}
 
               {/* Role actions */}
               <div className="mt-6 border-t border-zinc-800 pt-5">
@@ -167,6 +179,7 @@ export default function AdminUsersPage() {
                       icon={<Shield size={13} />}
                       label="Promote to mod"
                       variant="teal"
+                      onClick={() => changeRole(selected.id, "mod")}
                     />
                   )}
                   {selected.role === "mod" && (
@@ -174,6 +187,7 @@ export default function AdminUsersPage() {
                       icon={<User size={13} />}
                       label="Demote to user"
                       variant="zinc"
+                      onClick={() => changeRole(selected.id, "user")}
                     />
                   )}
                   {selected.role !== "admin" && (
@@ -181,6 +195,7 @@ export default function AdminUsersPage() {
                       icon={<Shield size={13} />}
                       label="Make admin"
                       variant="violet"
+                      onClick={() => changeRole(selected.id, "admin")}
                     />
                   )}
                   {selected.role === "admin" && (
@@ -188,9 +203,23 @@ export default function AdminUsersPage() {
                       icon={<User size={13} />}
                       label="Demote to mod"
                       variant="zinc"
+                      onClick={() => changeRole(selected.id, "mod")}
                     />
                   )}
                 </div>
+              </div>
+
+              {/* Danger zone */}
+              <div className="mt-6 border-t border-zinc-800 pt-5">
+                <p className="mb-3 text-xs font-medium uppercase tracking-[0.15em] text-red-600">Danger</p>
+                <ActionButton
+                  icon={<User size={13} />}
+                  label="Delete account"
+                  variant="danger"
+                  onClick={() => {
+                    if (confirm(`Delete ${selected.email}? This cannot be undone.`)) removeUser(selected.id);
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -204,14 +233,16 @@ export default function AdminUsersPage() {
   );
 }
 
-function ActionButton({ icon, label, variant }) {
+function ActionButton({ icon, label, variant, onClick }) {
   const variants = {
     teal: "border-teal-700 text-teal-400 hover:bg-teal-500/10",
     violet: "border-violet-700 text-violet-400 hover:bg-violet-500/10",
     zinc: "border-zinc-700 text-zinc-400 hover:bg-zinc-800",
+    danger: "border-red-800 text-red-400 hover:bg-red-500/10",
   };
   return (
     <button
+      onClick={onClick}
       className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors ${variants[variant]}`}
     >
       {icon}
