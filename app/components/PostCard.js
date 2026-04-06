@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, MessageSquare, ImageOff } from "lucide-react";
-import { timeAgo } from "@/lib/utils";
+import { ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
 import Avatar from "./Avatar";
 import { api } from "@/lib/api";
 
@@ -12,6 +11,21 @@ export default function PostCard({ post }) {
   const [vote, setVote] = useState(null);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [likedBy, setLikedBy] = useState(null);
+  const [likedByOpen, setLikedByOpen] = useState(false);
+  const [likedByLoading, setLikedByLoading] = useState(false);
+  const likedByRef = useRef(null);
+
+  useEffect(() => {
+    if (!likedByOpen) return;
+    function handleClickOutside(e) {
+      if (likedByRef.current && !likedByRef.current.contains(e.target)) {
+        setLikedByOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [likedByOpen]);
 
   function castVote(dir) {
     setVote((prev) => {
@@ -27,8 +41,28 @@ export default function PostCard({ post }) {
     });
   }
 
+  // fetch the list of users who liked the post.
+  async function handleLikedByClick(e) {
+    e.stopPropagation();
+    if (likedByOpen) {
+      setLikedByOpen(false);
+      return;
+    }
+    setLikedByOpen(true);
+    if (likedBy !== null) return;
+    setLikedByLoading(true);
+    try {
+      const data = await api.getPostLikedBy(String(post.id));
+      setLikedBy(data);
+    } catch {
+      setLikedBy([]);
+    } finally {
+      setLikedByLoading(false);
+    }
+  }
+
   return (
-    <article className="flex gap-3 border border-zinc-800 bg-zinc-900 px-3 py-3 transition-colors hover:border-zinc-700">
+    <article className="flex w-full gap-3 border border-zinc-800 bg-zinc-900 px-3 py-3 transition-colors hover:border-zinc-700">
       {/* Vote column */}
       <div className="flex w-6 shrink-0 flex-col items-center gap-0.5 pt-1">
         <button
@@ -39,13 +73,36 @@ export default function PostCard({ post }) {
         >
           <ArrowUp size={13} />
         </button>
-        <span
-          className={`text-[11px] font-semibold tabular-nums ${
-            vote === "up" ? "text-teal-400" : vote === "down" ? "text-red-400" : "text-zinc-500"
-          }`}
-        >
-          {score}
-        </span>
+        <div className="relative" ref={likedByRef}>
+          <button
+            className={`text-[11px] font-semibold tabular-nums ${
+              vote === "up" ? "text-teal-400" : vote === "down" ? "text-red-400" : "text-zinc-500"
+            }`}
+            onClick={handleLikedByClick}
+          >
+            {score}
+          </button>
+
+            {/* liked by window is opened  */}
+          {likedByOpen && (
+            <div className="absolute left-1/2 -translate-x-1/2 top-5 z-50 min-w-[120px] rounded-md border border-zinc-700 bg-zinc-900 py-1.5 shadow-lg">
+              {likedByLoading ? (
+                <p className="px-3 py-1 text-[11px] text-zinc-500">Loading…</p>
+              ) : likedBy && likedBy.length > 0 ? (
+                <ul className="max-h-40 overflow-y-auto">
+                  {likedBy.map((u) => (
+                    <li key={u.user_name ?? u} className="px-3 py-0.5 text-[11px] text-zinc-300">
+                      @{u.user_name ?? u}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-3 py-1 text-[11px] text-zinc-500">No likes yet</p>
+              )}
+            </div>
+          )}
+
+        </div>
         <button
           onClick={() => castVote("down")}
           className={`rounded p-0.5 transition-colors hover:bg-zinc-800 ${
@@ -67,8 +124,7 @@ export default function PostCard({ post }) {
               onClick={(e) => e.stopPropagation()}
             >
               @{post.author.username}
-            </Link>
-            <span className="font-medium text-teal-400/80"> #{post.community.name}</span>
+            </Link> 
           </p>
         </div>
 
@@ -85,36 +141,27 @@ export default function PostCard({ post }) {
             {post.content}
           </p>
         )}
-        {post.imageLink && (
+        {post.imageLink && !imgError && (
           <Link href={`/posts/${post.id}`} className="mt-2 block">
             <div
-              className="relative w-full overflow-hidden rounded-md bg-zinc-900 flex items-center justify-center"
-              style={{ maxHeight: "80vh" }}
+              className="relative flex max-h-[32rem] w-full items-center justify-center overflow-hidden rounded-md bg-zinc-950/70"
             >
               {!imgLoaded && !imgError && (
                 <div className="h-52 w-full animate-pulse bg-zinc-800" />
               )}
-              {imgError ? (
-                <div className="flex h-32 items-center justify-center gap-2 text-xs text-zinc-600">
-                  <ImageOff size={14} /> Image unavailable
-                </div>
-              ) : (
-                <img
-                  src={post.imageLink}
-                  alt={post.title}
-                  onLoad={() => setImgLoaded(true)}
-                  onError={() => setImgError(true)}
-                  className={`w-full object-contain transition-opacity duration-300 ${
-                    imgLoaded ? "opacity-100" : "opacity-0"
-                  }`}
-                  style={{ maxHeight: "80vh" }}
-                />
-              )}
+              <img
+                src={post.imageLink}
+                alt={post.title}
+                onLoad={() => setImgLoaded(true)}
+                onError={() => setImgError(true)}
+                className={`max-h-[32rem] w-full object-contain transition-opacity duration-300 ${
+                  imgLoaded ? "opacity-100" : "opacity-0"
+                }`}
+              />
             </div>
           </Link>
         )}
 
-        {/* Footer */}
         <div className="mt-2 flex items-center gap-1">
           <Link
             href={`/posts/${post.id}`}
@@ -124,6 +171,7 @@ export default function PostCard({ post }) {
             {post.commentCount}
           </Link>
         </div>
+        
       </div>
     </article>
   );
