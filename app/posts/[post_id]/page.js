@@ -16,16 +16,69 @@ import { timeAgo } from "@/lib/utils";
 import Avatar from "../../components/Avatar";
 import { AUTH_FIELD_CLASS } from "@/lib/authUi";
 
-const COMMENTS_BATCH = 3;
+const COMMENTS_LIMIT = 10;
+
+function mergeIncomingTopComment(prev, incoming) {
+  for (const item of prev) {
+    if (item.id === incoming.id) {
+      return prev;
+    }
+  }
+  return [incoming, ...prev];
+}
 
 export default function PostPage({ params: paramsPromise }) {
   const { post_id } = use(paramsPromise);
   const [post, setPost] = useState(null);
-  const [allComments, setAllComments] = useState([]);
+  const [comments, setComments] = useState([]);
+  const [topOffset, setTopOffset] = useState(0);
+  const [hasMoreTop, setHasMoreTop] = useState(true);
+  const [loadingTop, setLoadingTop] = useState(false);
   const [score, setScore] = useState(0);
   const [voted, setVoted] = useState(null); // null | "up"
   const [commentText, setCommentText] = useState("");
-  const [visible, setVisible] = useState(COMMENTS_BATCH);
+  const [totalCommentCount, setTotalCommentCount] = useState(0);
+
+  useEffect(() => {
+    if (!post_id) return;
+
+    const protocol = globalThis.window.location.protocol === "https:" ? "wss" : "ws";
+    const host = globalThis.window.location.hostname;
+    const ws = new WebSocket(`${protocol}://${host}:8003/ws/post/${post_id}`);
+
+    ws.onopen = () => {
+      ws.send("ping");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+
+        if (payload?.event === "like_update" && payload.like_count !== undefined) {
+          setScore(payload.like_count);
+          return;
+        }
+
+        const raw = payload?.comment;
+        if (!raw || payload?.event !== "comment_update") return;
+
+        const incoming = normalizeComment(raw);
+
+        // Keep top-level feed in sync; replies are fetched on demand per thread.
+        if (!incoming.parentId) {
+          setComments((prev) => mergeIncomingTopComment(prev, incoming));
+        }
+        setTotalCommentCount((v) => v + 1);
+        setTopOffset((v) => v + 1);
+      } catch {
+        // ignore malformed ws payloads
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [post_id]);
 
   useEffect(() => {
     api.getPost(post_id)
@@ -33,20 +86,47 @@ export default function PostPage({ params: paramsPromise }) {
         const p = normalizePost(raw);
         setPost(p);
         setScore(p.likes);
+        setTotalCommentCount(p.commentCount ?? 0);
       })
       .catch((e) => console.error("Post:", e.message));
-    api.getComments(post_id)
-      .then((res) => setAllComments((Array.isArray(res) ? res : []).map(normalizeComment)))
-      .catch((e) => console.error("Comments:", e.message));
+
+    setLoadingTop(true);
+    api.getComments(post_id, 0)
+      .then((res) => {
+        const list = (Array.isArray(res) ? res : []).map((item) => normalizeComment(item));
+        setComments(list);
+        setTopOffset(list.length);
+        setHasMoreTop(list.length >= COMMENTS_LIMIT);
+      })
+      .catch((e) => console.error("Comments:", e.message))
+      .finally(() => setLoadingTop(false));
   }, [post_id]);
 
   async function submitComment() {
     if (!commentText.trim()) return;
     try {
       const comment = await api.createComment({ post_id, body: commentText.trim() });
-      setAllComments((prev) => [normalizeComment(comment), ...prev]);
+      setComments((prev) => [normalizeComment(comment), ...prev]);
+      setTopOffset((v) => v + 1);
+      setTotalCommentCount((v) => v + 1);
       setCommentText("");
     } catch {}
+  }
+
+  async function loadMoreTopComments() {
+    if (loadingTop || !hasMoreTop) return;
+    setLoadingTop(true);
+    try {
+      const res = await api.getComments(post_id, topOffset);
+      const list = (Array.isArray(res) ? res : []).map((item) => normalizeComment(item));
+      setComments((prev) => [...prev, ...list]);
+      setTopOffset((v) => v + list.length);
+      setHasMoreTop(list.length >= COMMENTS_LIMIT);
+    } catch (e) {
+      console.error("More comments:", e.message);
+    } finally {
+      setLoadingTop(false);
+    }
   }
 
   function toggleVote() {
@@ -64,9 +144,6 @@ export default function PostPage({ params: paramsPromise }) {
   }
 
   if (!post) return <div className="py-20 text-center text-xs text-zinc-600">Loading…</div>;
-
-  const shown = allComments.slice(0, visible);
-  const remaining = allComments.length - visible;
 
   return (
     <div className="mx-auto w-[70%] min-w-[320px] py-8">
@@ -127,7 +204,7 @@ export default function PostPage({ params: paramsPromise }) {
             <ArrowUp size={13} /> {score}
           </button>
           <span className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-zinc-600">
-            <MessageSquare size={13} /> {allComments.length} comment{allComments.length !== 1 ? "s" : ""}
+            <MessageSquare size={13} /> {totalCommentCount} comment{totalCommentCount === 1 ? "" : "s"}
           </span>
         </div>
       </article>
@@ -163,25 +240,24 @@ export default function PostPage({ params: paramsPromise }) {
       </div>
 
       {/* ── Comments ────────────────────────────────────────── */}
-      {allComments.length > 0 && (
+      {(comments.length > 0 || hasMoreTop || loadingTop) && (
         <div className="mt-8">
           <p className="mb-4 text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-600">
-            {allComments.length} comment{allComments.length !== 1 ? "s" : ""}
+            {totalCommentCount} comment{totalCommentCount === 1 ? "" : "s"}
           </p>
 
           <div className="flex flex-col gap-3">
-            {shown.map((c) => (
-              <CommentItem key={c.id} comment={c} depth={0} postId={post_id} onReply={(nc) => setAllComments((prev) => [nc, ...prev])} />
+            {comments.map((c) => (
+              <CommentItem key={c.id} comment={c} depth={0} postId={post_id} onReply={() => setTotalCommentCount((v) => v + 1)} />
             ))}
           </div>
 
-          {remaining > 0 && (
+          {hasMoreTop && (
             <button
-              onClick={() => setVisible((v) => v + COMMENTS_BATCH)}
+              onClick={loadMoreTopComments}
               className="mt-4 w-full rounded-md border border-zinc-800 py-2.5 text-xs text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-300"
             >
-              Load {Math.min(COMMENTS_BATCH, remaining)} more comment
-              {Math.min(COMMENTS_BATCH, remaining) !== 1 ? "s" : ""}
+              {loadingTop ? "Loading..." : "Load more comments"}
             </button>
           )}
         </div>
@@ -219,7 +295,12 @@ function PostImage({ src, alt }) {
 function CommentItem({ comment, depth = 0, postId, onReply }) {
   const [score, setScore] = useState(comment.likes);
   const [vote, setVote] = useState(null);
-  const [repliesLoaded, setRepliesLoaded] = useState(false);
+  const [repliesVisible, setRepliesVisible] = useState(false);
+  const [repliesInitialized, setRepliesInitialized] = useState(false);
+  const [repliesLoading, setRepliesLoading] = useState(false);
+  const [replies, setReplies] = useState([]);
+  const [replyOffset, setReplyOffset] = useState(0);
+  const [hasMoreReplies, setHasMoreReplies] = useState(true);
   const [showReply, setShowReply] = useState(false);
   const [replyText, setReplyText] = useState("");
 
@@ -236,7 +317,38 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
     });
   }
 
-  const hasReplies = comment.replies?.length > 0;
+  async function loadReplies(nextOffset = 0) {
+    if (repliesLoading) return;
+    setRepliesLoading(true);
+    try {
+      const res = await api.getComments(postId, nextOffset, comment.id);
+      const list = (Array.isArray(res) ? res : []).map((item) => normalizeComment(item));
+      if (nextOffset === 0) {
+        setReplies(list);
+      } else {
+        setReplies((prev) => [...prev, ...list]);
+      }
+      setReplyOffset(nextOffset + list.length);
+      setHasMoreReplies(list.length >= COMMENTS_LIMIT);
+      setRepliesInitialized(true);
+    } catch {
+      setHasMoreReplies(false);
+    } finally {
+      setRepliesLoading(false);
+    }
+  }
+
+  async function toggleReplies() {
+    if (repliesVisible) {
+      setRepliesVisible(false);
+      return;
+    }
+
+    if (!repliesInitialized) {
+      await loadReplies(0);
+    }
+    setRepliesVisible(true);
+  }
 
   return (
     <div>
@@ -304,18 +416,16 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
               </button>
 
               {/* Load / hide replies */}
-              {hasReplies && (
+              {!(repliesInitialized && replies.length === 0 && !repliesLoading) && (
                 <button
-                  onClick={() => setRepliesLoaded((v) => !v)}
+                  onClick={toggleReplies}
                   className="ml-auto flex items-center gap-1 text-xs text-zinc-600 transition-colors hover:text-zinc-300"
                 >
                   <ChevronDown
                     size={11}
-                    className={`transition-transform duration-150 ${repliesLoaded ? "rotate-180" : ""}`}
+                    className={`transition-transform duration-150 ${repliesVisible ? "rotate-180" : ""}`}
                   />
-                  {repliesLoaded
-                    ? "Hide replies"
-                    : `Load ${comment.replies.length} ${comment.replies.length === 1 ? "reply" : "replies"}`}
+                  {repliesLoading ? "Loading..." : repliesVisible ? "Hide replies" : "View replies"}
                 </button>
               )}
             </div>
@@ -335,7 +445,12 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
                     onClick={async () => {
                       try {
                         const reply = await api.createComment({ post_id: postId, body: replyText.trim(), parent_id: comment.id });
-                        onReply?.(normalizeComment(reply));
+                        const normalized = normalizeComment(reply);
+                        setReplies((prev) => [normalized, ...prev]);
+                        setRepliesVisible(true);
+                        setRepliesInitialized(true);
+                        setReplyOffset((v) => v + 1);
+                        onReply?.(normalized);
                       } catch {}
                       setShowReply(false);
                       setReplyText("");
@@ -358,11 +473,19 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
       </div>
 
       {/* Nested replies — only rendered once "Load replies" is clicked */}
-      {repliesLoaded && hasReplies && (
+      {repliesVisible && replies.length > 0 && (
         <div className="ml-4 mt-1.5 flex flex-col gap-1.5 border-l border-zinc-800 pl-2">
-          {comment.replies.map((r) => (
+          {replies.map((r) => (
             <CommentItem key={r.id} comment={r} depth={depth + 1} postId={postId} onReply={onReply} />
           ))}
+          {hasMoreReplies && (
+            <button
+              onClick={() => loadReplies(replyOffset)}
+              className="self-start rounded-md border border-zinc-800 px-2.5 py-1 text-xs text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-300"
+            >
+              {repliesLoading ? "Loading..." : "Load more replies"}
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -7,7 +7,6 @@ import { AUTH_FIELD_CLASS } from "@/lib/authUi";
 import Link from "next/link";
 import { api, normalizePost, uploadToCloudinary } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
-import { CldOgImage } from "next-cloudinary";
 
 const PAGE_SIZE = 4;
 const FILTERS = [
@@ -21,6 +20,8 @@ export default function HomePage() {
   const [filter, setFilter] = useState("suggested");
   const [filterOpen, setFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [feedError, setFeedError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [adminSearch, setAdminSearch] = useState("");
   const [adminSearchOpen, setAdminSearchOpen] = useState(false);
@@ -69,21 +70,39 @@ export default function HomePage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  /* fetch feed */
+
+  // feed generate and load 
   useEffect(() => {
-    api.generateFeed(filter)
-      .then(async (res) => {
-        const ids = res.post_ids ?? [];
-        const results = await Promise.allSettled(ids.map((id) => api.getPost(String(id))));
-        const ok = results
-          .filter((r) => r.status === "fulfilled")
-          .map((r) => normalizePost(r.value));
-        setPosts(ok);
-      })
-      .catch((e) => { console.error("Feed:", e.message); setPosts([]); });
+    let active = true;
+
+    async function loadFeed() {
+      setFeedLoading(true);
+      setFeedError("");
+      try {
+        const res = await api.generateFeed(filter);
+        if (!active) return;
+        const items = Array.isArray(res?.posts) ? res.posts : [];
+        setPosts(items.map(normalizePost));
+        setPage(1);
+      } catch (err) {
+        if (!active) return;
+        setPosts([]);
+        setFeedError(err.message || "Failed to load feed");
+      } finally {
+        if (active) {
+          setFeedLoading(false);
+        }
+      }
+    }
+
+    loadFeed();
+
+    return () => {
+      active = false;
+    };
   }, [filter]);
 
-  /* fetch available tags */
+  // fetch the available tags
   useEffect(() => {
     api.getTags()
       .then((res) => setTags((res ?? []).map((t) => t.name)))
@@ -179,7 +198,7 @@ export default function HomePage() {
   const activeFilter = FILTERS.find((f) => f.id === filter);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
+    <div className="mx-auto w-full px-4 py-8 lg:w-2/3">
 
       {/* Mod / Admin search with fast results */}
       {isPrivileged && (
@@ -296,9 +315,23 @@ export default function HomePage() {
 
       {/* Post list */}
       <div className="flex flex-col gap-2">
-        {pagePosts.map((post) => (
-          <PostCard key={post.id} post={post} />
-        ))}
+        {feedLoading ? (
+          <div className="rounded-md border border-zinc-800 bg-zinc-900 px-4 py-6 text-sm text-zinc-500">
+            Loading {activeFilter.label.toLowerCase()} feed...
+          </div>
+        ) : feedError ? (
+          <div className="rounded-md border border-red-900/40 bg-red-950/20 px-4 py-6 text-sm text-red-300">
+            {feedError}
+          </div>
+        ) : pagePosts.length === 0 ? (
+          <div className="rounded-md border border-zinc-800 bg-zinc-900 px-4 py-6 text-sm text-zinc-500">
+            No posts found for this feed.
+          </div>
+        ) : (
+          pagePosts.map((post) => (
+            <PostCard key={post.id} post={post} />
+          ))
+        )}
       </div>
 
       {/* Pagination */}

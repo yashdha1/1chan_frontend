@@ -72,6 +72,7 @@ export function normalizePost(p) {
 export function normalizeComment(c) {
   return {
     id: String(c.comment_id),
+    parentId: c.parent_id ?? null,
     author: { id: c.user_name, username: c.user_name, avatar: c.user_avatar ?? null },
     content: c.body,
     createdAt: c.created_at ?? new Date().toISOString(),
@@ -133,6 +134,8 @@ export const api = {
     apiFetch(`/posts/${id}`),
   getUserPosts: (username) =>
     apiFetch(`/posts/user/${encodeURIComponent(username)}`),
+  generateFeed: (feed_type = "suggested") => // fetching the feed /home page pr : 
+    apiFetch(`/posts/build_feed/${feed_type}`),
 
   createPost: (data) =>
     apiFetch("/posts", { method: "POST", body: data }),
@@ -146,14 +149,15 @@ export const api = {
     apiFetch(`/posts/${id}/like`, { method: "POST" }),
   unlikePost: (id) =>
     apiFetch(`/posts/${id}/unlike`, { method: "POST" }),
-
-
+  getPostLikedBy: (id) =>
+    apiFetch(`/posts/${id}/liked_by`, { method: "GET" }),
+  
   getComments: (postId, offset = 0, parentId = null) =>
     apiFetch(`/posts/comments/${postId}`, {
       params: { offset, ...(parentId ? { parent_id: parentId } : {}) },
     }),
   createComment: (data) =>
-    apiFetch("/posts/comments/", { method: "POST", body: data }),
+    apiFetch("/posts/comments", { method: "POST", body: data }),
   deleteComment: (commentId) =>
     apiFetch(`/posts/comments/${commentId}`, { method: "DELETE" }),
   likeComment: (commentId) =>
@@ -161,9 +165,6 @@ export const api = {
   unlikeComment: (commentId) =>
     apiFetch("/posts/comments/unlike", { method: "POST", body: { comment_id: commentId } }),
 
-
-  generateFeed: (feed_type = "suggested") =>
-    apiFetch(`/feed/generate_feed/${feed_type}`),
   getTags: () =>
     apiFetch("/feed/operation/get_tags"),
   recordViewed: (body) =>
