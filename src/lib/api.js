@@ -72,6 +72,7 @@ export function normalizePost(p) {
 export function normalizeComment(c) {
   return {
     id: String(c.comment_id),
+    parentId: c.parent_id ?? null,
     author: { id: c.user_name, username: c.user_name, avatar: c.user_avatar ?? null },
     content: c.body,
     createdAt: c.created_at ?? new Date().toISOString(),
@@ -156,7 +157,7 @@ export const api = {
       params: { offset, ...(parentId ? { parent_id: parentId } : {}) },
     }),
   createComment: (data) =>
-    apiFetch("/posts/comments/", { method: "POST", body: data }),
+    apiFetch("/posts/comments", { method: "POST", body: data }),
   deleteComment: (commentId) =>
     apiFetch(`/posts/comments/${commentId}`, { method: "DELETE" }),
   likeComment: (commentId) =>

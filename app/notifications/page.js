@@ -7,10 +7,22 @@ import { timeAgo } from "@/lib/utils";
 export default function NotificationsPage() {
   const [items, setItems] = useState([]);
 
+  // TODO : activity tab to be completed: 
   useEffect(() => {
-    api.getNotifications(0)
-      .then((res) => setItems(res ?? []))
-      .catch(() => {});
+    async function fetchNotifications() {
+      try {
+        const res = await api.getNotifications();
+        const normalized = Array.isArray(res)
+          ? res
+          : Array.isArray(res?.data)
+            ? res.data
+            : [];
+        setItems(normalized);
+      } catch {
+        setItems([]);
+      }
+    }
+    fetchNotifications();
   }, []);
 
   const unreadCount = items.filter((n) => !n.is_read || n.is_read === "false").length;
