@@ -7,6 +7,7 @@ import { AUTH_FIELD_CLASS } from "@/lib/authUi";
 import Link from "next/link";
 import { api, normalizePost, uploadToCloudinary } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
+import { CldOgImage } from "next-cloudinary";
 
 const PAGE_SIZE = 4;
 const FILTERS = [
@@ -57,7 +58,7 @@ export default function HomePage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  /* close admin search dropdown when clicking outside */
+  /* close admin  */
   useEffect(() => {
     function handleClick(e) {
       if (adminSearchRef.current && !adminSearchRef.current.contains(e.target)) {
@@ -157,9 +158,11 @@ export default function HomePage() {
     try {
       let image_link = null;
       if (imageFile) {
-        const result = await uploadToCloudinary(imageFile, crypto.randomUUID());
+        console.log("Uploading image to Cloudinary.");
+        const result = await uploadToCloudinary(imageFile, crypto.randomUUID()); 
         image_link = result.secure_url;
       }
+      console.log("Creating post with data:", { ...form, image_link, tags: selectedTags });
       const newPost = await api.createPost({
         title: form.title,
         body: form.content,
@@ -325,7 +328,6 @@ export default function HomePage() {
         >
           <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl">
 
-            {/* Modal header */}
             <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-5 py-4">
               <p className="text-sm font-semibold text-zinc-200">New Post</p>
               <button

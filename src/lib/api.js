@@ -2,31 +2,14 @@ import axios from "axios";
 
 const client = axios.create({
   baseURL: "/api/v1",
+  withCredentials: true, // always send cookies (access_token, refresh_token)
 });
 
-/* ── Token management ──────────────────────────────────────── */
 
-const TOKEN_KEY = "access_token";
+export function setAccessToken(_token) {}
 
-let accessToken = (() => {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-})();
-
-export function setAccessToken(token) {
-  accessToken = token;
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {}
-}
-
-// Attach Bearer token to every request
-client.interceptors.request.use((config) => {
-  if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
-  return config;
-});
-
-// Auto-refresh on 401
+// Auto-refresh on 401 
+// just call the /refresh endpoint :
 let refreshing = null;
 client.interceptors.response.use(
   (res) => res,
@@ -43,22 +26,16 @@ client.interceptors.response.use(
       if (!refreshing) {
         refreshing = client
           .post("/free_auth/refresh")
-          .then((r) => {
-            setAccessToken(r.data.access_token);
-          })
           .finally(() => { refreshing = null; });
       }
       await refreshing;
-      err.config.headers.Authorization = `Bearer ${accessToken}`;
       return client(err.config);
     } catch {
-      setAccessToken(null);
       return Promise.reject(err);
     }
   },
 );
-
-/* ── Helpers ───────────────────────────────────────────────── */
+ 
 
 export function parseJwt(token) {
   try {
@@ -122,11 +99,9 @@ export async function uploadToCloudinary(file, userId) {
   return await res.json();
 }
 
-/* ── API ───────────────────────────────────────────────────── */
-
+ 
 export const api = {
 
-  // ── free_auth (public) ──────────────────────────────────
   login: (username, password) =>
     apiFetch("/free_auth/login", { method: "POST", body: { username, password } }),
   register: (payload) =>
@@ -134,7 +109,7 @@ export const api = {
   refresh: () =>
     apiFetch("/free_auth/refresh", { method: "POST" }),
 
-  // ── auth (protected) ───────────────────────────────────
+  // auth (protected) 
   logout: () =>
     apiFetch("/auth/logout", { method: "POST" }),
   getProfile: async (username) => {
@@ -145,8 +120,7 @@ export const api = {
     apiFetch("/auth/profile", { method: "PATCH", body: data }).then((r) => r?.user ?? r),
   deleteOwnProfile: () =>
     apiFetch("/auth/profile", { method: "DELETE" }),
-
-  // ── admin ───────────────────────────────────────────────
+ 
   getUsers: (role = "all") =>
     apiFetch(`/auth/admin/users/${role}`),
   updateUserRole: (userId, newRole) =>
@@ -154,13 +128,14 @@ export const api = {
   deleteUser: (userId) =>
     apiFetch(`/auth/admin/users/${userId}`, { method: "DELETE" }),
 
-  // ── posts ───────────────────────────────────────────────
+  // posts
   getPost: (id) =>
     apiFetch(`/posts/${id}`),
   getUserPosts: (username) =>
     apiFetch(`/posts/user/${encodeURIComponent(username)}`),
+
   createPost: (data) =>
-    apiFetch("/posts/", { method: "POST", body: data }),
+    apiFetch("/posts", { method: "POST", body: data }),
   updatePost: (id, data) =>
     apiFetch(`/posts/${id}`, { method: "PATCH", body: data }),
   deletePost: (id) =>
@@ -172,7 +147,7 @@ export const api = {
   unlikePost: (id) =>
     apiFetch(`/posts/${id}/unlike`, { method: "POST" }),
 
-  // ── comments ────────────────────────────────────────────
+
   getComments: (postId, offset = 0, parentId = null) =>
     apiFetch(`/posts/comments/${postId}`, {
       params: { offset, ...(parentId ? { parent_id: parentId } : {}) },
@@ -186,7 +161,7 @@ export const api = {
   unlikeComment: (commentId) =>
     apiFetch("/posts/comments/unlike", { method: "POST", body: { comment_id: commentId } }),
 
-  // ── feed ────────────────────────────────────────────────
+
   generateFeed: (feed_type = "suggested") =>
     apiFetch(`/feed/generate_feed/${feed_type}`),
   getTags: () =>
@@ -198,7 +173,7 @@ export const api = {
   addTag: (tag) =>
     apiFetch("/feed/operation/add_tag", { method: "POST", body: tag }),
 
-  // ── notifications ───────────────────────────────────────
+
   getNotifications: (offset = 0) =>
     apiFetch(`/notifications/activity/${offset}`, { method: "POST" }),
   markRead: (id) =>
