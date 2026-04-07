@@ -53,7 +53,7 @@ export default function PostCard({ post }) {
     setLikedByLoading(true);
     try {
       const data = await api.getPostLikedBy(String(post.id));
-      setLikedBy(data);
+      setLikedBy(Array.isArray(data) ? data : data?.users ?? []);
     } catch {
       setLikedBy([]);
     } finally {
