@@ -63,6 +63,7 @@ export function normalizePost(p) {
     title: p.title,
     content: p.body,
     imageLink: p.image_link ?? null,
+    tags: Array.isArray(p.tags) ? p.tags : [],
     likes: p.like_count ?? 0,
     commentCount: p.comment_count ?? 0,
     createdAt: p.created_at ?? new Date().toISOString(),
@@ -73,6 +74,7 @@ export function normalizeComment(c) {
   return {
     id: String(c.comment_id),
     parentId: c.parent_id ?? null,
+    userId: String(c.user_id),
     author: { id: c.user_name, username: c.user_name, avatar: c.user_avatar ?? null },
     content: c.body,
     createdAt: c.created_at ?? new Date().toISOString(),

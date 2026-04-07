@@ -10,14 +10,14 @@ import { useAuthStore } from "@/store/authStore";
 
 const PAGE_SIZE = 4;
 const FILTERS = [
-  { id: "suggested", label: "Suggested" },
   { id: "latest", label: "Latest" },
+  { id: "suggested", label: "Suggested" },
 ];
 const MAX_TAGS = 5;
 const EMPTY_FORM = { title: "", content: "" };
 
 export default function HomePage() {
-  const [filter, setFilter] = useState("suggested");
+  const [filter, setFilter] = useState("latest");
   const [filterOpen, setFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [feedLoading, setFeedLoading] = useState(true);
@@ -125,6 +125,10 @@ export default function HomePage() {
   const pagePosts = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const hasAdminResults = searchedPosts.length > 0;
 
+  function handlePostDeleted(postId) {
+    setPosts((currentPosts) => currentPosts.filter((post) => post.id !== postId));
+  }
+
   function changeFilter(f) {
     setFilter(f);
     setFilterOpen(false);
@@ -201,7 +205,7 @@ export default function HomePage() {
     <div className="mx-auto w-full px-4 py-8 lg:w-2/3">
 
       {/* Mod / Admin search with fast results */}
-      {isPrivileged && (
+      {/* {isPrivileged && (
         <div ref={adminSearchRef} className="mb-8 relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500 pointer-events-none z-10" />
           <input
@@ -220,8 +224,7 @@ export default function HomePage() {
               <X size={13} />
             </button>
           )}
-
-          {/* Results dropdown */}
+ 
           {adminSearchOpen && adminSearch.trim() && (
             <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900 shadow-xl">
               {!hasAdminResults && (
@@ -278,7 +281,7 @@ export default function HomePage() {
             </div>
           )}
         </div>
-      )}
+      )} */}
 
       {/* Filter dropdown */}
       <div className="mb-4 flex items-center justify-between border-b border-zinc-800 pb-3">
@@ -329,7 +332,12 @@ export default function HomePage() {
           </div>
         ) : (
           pagePosts.map((post) => (
-            <PostCard key={post.id} post={post} />
+            <PostCard
+              key={post.id}
+              post={post}
+              canModerateDelete={isPrivileged}
+              onDeleted={handlePostDeleted}
+            />
           ))
         )}
       </div>
