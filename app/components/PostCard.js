@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
+import { ArrowUp, ArrowDown, MessageSquare, Trash2 } from "lucide-react";
 import Avatar from "./Avatar";
 import { api } from "@/lib/api";
 
-export default function PostCard({ post }) {
+export default function PostCard({ post, canModerateDelete = false, onDeleted }) {
   const [score, setScore] = useState(post.likes);
   const [vote, setVote] = useState(null);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -14,6 +14,7 @@ export default function PostCard({ post }) {
   const [likedBy, setLikedBy] = useState(null);
   const [likedByOpen, setLikedByOpen] = useState(false);
   const [likedByLoading, setLikedByLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const likedByRef = useRef(null);
 
   useEffect(() => {
@@ -53,11 +54,22 @@ export default function PostCard({ post }) {
     setLikedByLoading(true);
     try {
       const data = await api.getPostLikedBy(String(post.id));
-      setLikedBy(data);
+      setLikedBy(Array.isArray(data) ? data : data?.users ?? []);
     } catch {
       setLikedBy([]);
     } finally {
       setLikedByLoading(false);
+    }
+  }
+
+  async function handleDeletePost() {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await api.deletePost(String(post.id));
+      onDeleted?.(post.id);
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -170,6 +182,17 @@ export default function PostCard({ post }) {
             <MessageSquare size={11} />
             {post.commentCount}
           </Link>
+          {canModerateDelete && (
+            <button
+              type="button"
+              onClick={handleDeletePost}
+              disabled={isDeleting}
+              className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-red-400/80 transition-colors hover:bg-zinc-800 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Trash2 size={11} />
+              {isDeleting ? "Deleting..." : "Delete"}
+            </button>
+          )}
         </div>
         
       </div>

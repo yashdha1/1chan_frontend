@@ -1,20 +1,26 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
-import Link from "next/link";
-import { X } from "lucide-react";
-import { api, normalizePost } from "@/lib/api";
+/* eslint-disable react/prop-types, jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */
+
+import { useState, useEffect, use, useRef } from "react";
+import { Image, Pencil, Tag, X } from "lucide-react";
+import { api, normalizePost, uploadToCloudinary } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { AUTH_FIELD_CLASS, AUTH_PRIMARY_BUTTON_CLASS } from "@/lib/authUi";
 import PostCard from "../../components/PostCard";
 import Avatar from "../../components/Avatar";
 
+const MAX_TAGS = 5;
+const EMPTY_POST_FORM = { title: "", content: "" };
+
 export default function ProfilePage({ params: paramsPromise }) {
   const params = use(paramsPromise);
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [tags, setTags] = useState([]);
   const [error, setError] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
   const [adminTools, setAdminTools] = useState(false);
   const currentUser = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
@@ -27,10 +33,28 @@ export default function ProfilePage({ params: paramsPromise }) {
       .catch((e) => setError(e.message));
   }, [params.user_id]);
 
+  useEffect(() => {
+    api.getTags()
+      .then((res) => setTags((res ?? []).map((tag) => tag.name)))
+      .catch(() => {});
+  }, []);
+
   function onSaved(updated) {
     setProfile((p) => ({ ...p, ...updated }));
     updateProfile({ username: updated.username, avatar: updated.avatar ?? null });
     setEditOpen(false);
+  }
+
+  function onPostSaved(updatedPost) {
+    setPosts((currentPosts) => currentPosts.map((post) => (
+      post.id === updatedPost.id ? updatedPost : post
+    )));
+    setEditingPost(null);
+  }
+
+  function onPostDeleted(postId) {
+    setPosts((currentPosts) => currentPosts.filter((post) => post.id !== postId));
+    setEditingPost(null);
   }
 
   if (error) return <div className="py-20 text-center text-sm text-red-400">{error}</div>;
@@ -38,7 +62,6 @@ export default function ProfilePage({ params: paramsPromise }) {
 
   const isOwn = currentUser?.username === profile.username;
   const isAdmin = currentUser?.role === "admin";
-  const isMod = currentUser?.role === "mod";
   const totalLikes = posts.reduce((sum, p) => sum + (p.likes ?? 0), 0);
 
   return (
@@ -82,7 +105,26 @@ export default function ProfilePage({ params: paramsPromise }) {
           Posts by {profile.username}
         </p>
         {posts.length > 0
-          ? <div className="flex flex-col gap-2">{posts.map((post) => <PostCard key={post.id} post={post} />)}</div>
+          ? (
+            <div className="flex flex-col gap-3">
+              {posts.map((post) => (
+                <div key={post.id} className="flex flex-col gap-1.5">
+                  <PostCard post={post} />
+                  {isOwn && (
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => setEditingPost(post)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 px-3 py-1.5 text-[11px] text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-300"
+                      >
+                        <Pencil size={12} />
+                        Edit post
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
           : (
             <div className="rounded-lg border border-zinc-800/60 py-12 text-center">
               <p className="text-sm text-zinc-500">
@@ -100,6 +142,17 @@ export default function ProfilePage({ params: paramsPromise }) {
         />
       )}
 
+      {editingPost && (
+        <EditPostModal
+          post={editingPost}
+          availableTags={tags}
+          currentUser={currentUser}
+          onClose={() => setEditingPost(null)}
+          onSaved={onPostSaved}
+          onDelete={onPostDeleted}
+        />
+      )}
+
       {adminTools && (
         <AdminToolsModal onClose={() => setAdminTools(false)} />
       )}
@@ -108,8 +161,11 @@ export default function ProfilePage({ params: paramsPromise }) {
 }
 
 function EditModal({ profile, onClose, onSaved }) {
-  const [form, setForm] = useState({ bio: profile.bio ?? "", avatar: profile.avatar ?? "" });
+  const [form, setForm] = useState({ username: profile.username ?? "", bio: profile.bio ?? "", avatar: profile.avatar ?? "" });
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [error, setError] = useState("");
 
   function handleChange(e) {
@@ -117,15 +173,64 @@ function EditModal({ profile, onClose, onSaved }) {
     setError("");
   }
 
+  useEffect(() => () => {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+  }, [avatarPreview]);
+
+  function handleAvatarFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Choose an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Avatar image must be at most 5 MB.");
+      return;
+    }
+
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+    setError("");
+  }
+
+  function clearAvatar() {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarPreview("");
+    setAvatarFile(null);
+    setForm((p) => ({ ...p, avatar: "" }));
+    setError("");
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!form.username.trim()) {
+      setError("Username is required.");
+      return;
+    }
     setIsLoading(true);
     setError("");
     try {
-      const updated = await api.updateProfile({ bio: form.bio.trim(), avatar: form.avatar.trim() });
+      let avatarUrl = form.avatar.trim();
+
+      if (avatarFile) {
+        setIsUploadingAvatar(true);
+        const upload = await uploadToCloudinary(avatarFile, profile.id ?? crypto.randomUUID());
+        avatarUrl = upload.secure_url ?? upload.url ?? avatarUrl;
+      }
+
+      const updated = await api.updateProfile({
+        username: form.username.trim(),
+        bio: form.bio.trim(),
+        avatar: avatarUrl,
+      });
       onSaved(updated);
     } catch (e) {
       setError(e.message ?? "Failed to save.");
+    } finally {
+      setIsUploadingAvatar(false);
       setIsLoading(false);
     }
   }
@@ -145,13 +250,27 @@ function EditModal({ profile, onClose, onSaved }) {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 px-5 py-5">
           <div className="flex items-center gap-3">
-            <Avatar src={form.avatar || null} username={profile.username} size="lg" />
-            <p className="text-sm font-medium text-zinc-300">{profile.username}</p>
+            <Avatar src={avatarPreview || form.avatar || null} username={form.username || profile.username} size="lg" />
+            <p className="text-sm font-medium text-zinc-300">{form.username || profile.username}</p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-zinc-500">Bio</label>
+            <label htmlFor="profile-username" className="text-xs text-zinc-500">Username</label>
+            <input
+              id="profile-username"
+              name="username"
+              type="text"
+              value={form.username}
+              onChange={handleChange}
+              placeholder="username"
+              className={AUTH_FIELD_CLASS}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="profile-bio" className="text-xs text-zinc-500">Bio</label>
             <textarea
+              id="profile-bio"
               name="bio"
               value={form.bio}
               onChange={handleChange}
@@ -162,15 +281,19 @@ function EditModal({ profile, onClose, onSaved }) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-zinc-500">Avatar URL</label>
+            <label htmlFor="profile-avatar" className="text-xs text-zinc-500">Avatar image (optional, max 5 MB)</label>
             <input
-              name="avatar"
-              type="url"
-              value={form.avatar}
-              onChange={handleChange}
-              placeholder="https://example.com/avatar.png"
+              id="profile-avatar"
+              type="file"
+              accept="image/*"
+              onChange={handleAvatarFileChange}
               className={AUTH_FIELD_CLASS}
             />
+            {(avatarPreview || form.avatar) && (
+              <button type="button" onClick={clearAvatar} className="w-fit text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline">
+                Remove avatar
+              </button>
+            )}
           </div>
 
           {error && <p className="text-xs text-red-400">{error}</p>}
@@ -181,10 +304,289 @@ function EditModal({ profile, onClose, onSaved }) {
             </button>
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || isUploadingAvatar}
               className={`${AUTH_PRIMARY_BUTTON_CLASS} disabled:opacity-60 disabled:cursor-not-allowed`}
             >
-              {isLoading ? "Saving…" : "Save"}
+              {isUploadingAvatar ? "Uploading avatar..." : isLoading ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditPostModal({ post, availableTags, currentUser, onClose, onSaved, onDelete }) {
+  const [form, setForm] = useState({
+    ...EMPTY_POST_FORM,
+    title: post.title ?? "",
+    content: post.content ?? "",
+  });
+  const [selectedTags, setSelectedTags] = useState(post.tags ?? []);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagDropOpen, setTagDropOpen] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(post.imageLink ?? null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState("");
+  const fileInputRef = useRef(null);
+  const tagInputRef = useRef(null);
+
+  useEffect(() => () => {
+    if (imagePreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(imagePreview);
+    }
+  }, [imagePreview]);
+
+  const tagSuggestions = availableTags.filter(
+    (tag) => tagQuery && tag.toLowerCase().includes(tagQuery.toLowerCase()) && !selectedTags.includes(tag)
+  ).slice(0, 6);
+
+  function handleImageChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (imagePreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  }
+
+  function resetImageSelection() {
+    if (imagePreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImageFile(null);
+    setImagePreview(post.imageLink ?? null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function addTag(tag) {
+    if (selectedTags.length >= MAX_TAGS) return;
+    setSelectedTags((currentTags) => [...currentTags, tag]);
+    setTagQuery("");
+    setTagDropOpen(false);
+    setError("");
+    tagInputRef.current?.focus();
+  }
+
+  function removeTag(tag) {
+    setSelectedTags((currentTags) => currentTags.filter((currentTag) => currentTag !== tag));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    const title = form.title.trim();
+    if (!title) {
+      setError("Title is required.");
+      return;
+    }
+
+    if (selectedTags.length === 0) {
+      setError("Add at least one tag.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+
+    try {
+      let image_link = post.imageLink ?? undefined;
+      if (imageFile) {
+        const result = await uploadToCloudinary(imageFile, crypto.randomUUID());
+        image_link = result.secure_url;
+      }
+
+      const payload = {
+        title,
+        body: form.content.trim(),
+        edited_by: currentUser?.username ?? "",
+        tags: selectedTags,
+      };
+
+      if (image_link) {
+        payload.image_link = image_link;
+      }
+
+      const updated = await api.updatePost(post.id, payload);
+      onSaved(normalizePost(updated));
+    } catch (e) {
+      setError(e.message ?? "Failed to update post.");
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setIsDeleting(true);
+    setError("");
+
+    try {
+      await api.deletePost(post.id);
+      onDelete(post.id);
+    } catch (e) {
+      setError(e.message ?? "Failed to delete post.");
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/75 px-4 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-5 py-4">
+          <p className="text-sm font-semibold text-zinc-200">Edit post</p>
+          <button onClick={onClose} className="rounded p-1 text-zinc-600 transition-colors hover:text-zinc-300">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
+          <input
+            placeholder="Title"
+            value={form.title}
+            onChange={(e) => { setForm((currentForm) => ({ ...currentForm, title: e.target.value })); setError(""); }}
+            className={AUTH_FIELD_CLASS}
+            required
+            autoFocus
+          />
+
+          <textarea
+            placeholder="What's on your mind?"
+            value={form.content}
+            onChange={(e) => { setForm((currentForm) => ({ ...currentForm, content: e.target.value })); setError(""); }}
+            rows={5}
+            className={`${AUTH_FIELD_CLASS} resize-none`}
+          />
+
+          <div>
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+              <Image size={12} /> Image
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={handleImageChange}
+            />
+            {imagePreview ? (
+              <div className="relative overflow-hidden rounded-md border border-zinc-700">
+                <img src={imagePreview} alt={post.title} className="max-h-48 w-full object-cover" />
+                <button
+                  type="button"
+                  onClick={resetImageSelection}
+                  className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-zinc-950/70 text-zinc-300 backdrop-blur-sm transition-colors hover:text-zinc-100"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-zinc-700 py-4 text-xs text-zinc-500 transition-colors hover:border-zinc-500 hover:text-zinc-400"
+              >
+                <Image size={14} />
+                Upload image
+              </button>
+            )}
+            {imagePreview && (
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"
+                >
+                  Replace image
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+              <Tag size={12} /> Tags
+              <span className="ml-auto text-zinc-600">{selectedTags.length}/{MAX_TAGS}</span>
+            </p>
+
+            {selectedTags.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {selectedTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="flex items-center gap-1 rounded-full border border-teal-700/40 bg-teal-500/10 px-2.5 py-0.5 text-xs text-teal-400"
+                  >
+                    #{tag}
+                    <button type="button" onClick={() => removeTag(tag)} className="ml-0.5 opacity-60 hover:opacity-100">
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {selectedTags.length < MAX_TAGS && (
+              <div className="relative">
+                <input
+                  ref={tagInputRef}
+                  type="text"
+                  value={tagQuery}
+                  onChange={(e) => { setTagQuery(e.target.value); setTagDropOpen(true); }}
+                  onFocus={() => tagQuery && setTagDropOpen(true)}
+                  onBlur={() => setTimeout(() => setTagDropOpen(false), 150)}
+                  placeholder="Search tags…"
+                  className={`${AUTH_FIELD_CLASS} text-xs`}
+                />
+                {tagDropOpen && tagSuggestions.length > 0 && (
+                  <ul className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900 py-1 shadow-lg">
+                    {tagSuggestions.map((tag) => (
+                      <li key={tag}>
+                        <button
+                          type="button"
+                          onMouseDown={() => addTag(tag)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                        >
+                          <span className="text-zinc-600">#</span>{tag}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isSaving || isDeleting}
+              className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-zinc-500 transition-colors hover:bg-red-500/20 hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isDeleting ? "Deleting..." : "Delete Post"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving || isDeleting}
+              className="rounded-md px-4 py-2 text-sm text-zinc-500 transition-colors hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving || isDeleting}
+              className={`${AUTH_PRIMARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              {isSaving ? "Saving…" : "Save changes"}
             </button>
           </div>
         </form>
@@ -313,9 +715,10 @@ function AdminToolsModal({ onClose }) {
 
           {tab === "tags" && (
             <form onSubmit={handleAddTag} className="flex flex-col gap-3">
-              <label className="text-xs text-zinc-500">New tag name</label>
+              <label htmlFor="admin-new-tag" className="text-xs text-zinc-500">New tag name</label>
               <div className="flex gap-2">
                 <input
+                  id="admin-new-tag"
                   value={tag}
                   onChange={(e) => { setTag(e.target.value); setTagMsg(""); }}
                   placeholder="e.g. technology"

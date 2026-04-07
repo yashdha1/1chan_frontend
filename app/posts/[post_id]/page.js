@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react/prop-types */
+
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import {
@@ -10,11 +12,13 @@ import {
   MoreHorizontal,
   ChevronDown,
   Reply,
+  Trash2,
 } from "lucide-react";
 import { api, normalizePost, normalizeComment } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import Avatar from "../../components/Avatar";
 import { AUTH_FIELD_CLASS } from "@/lib/authUi";
+import { useAuthStore } from "@/store/authStore";
 
 const COMMENTS_LIMIT = 10;
 
@@ -25,6 +29,27 @@ function mergeIncomingTopComment(prev, incoming) {
     }
   }
   return [incoming, ...prev];
+}
+
+function markCommentDeleted(list, commentId) {
+  return list.map((item) => {
+    const nextReplies = item.replies?.length ? markCommentDeleted(item.replies, commentId) : item.replies;
+    if (item.id !== commentId) {
+      return nextReplies === item.replies ? item : { ...item, replies: nextReplies };
+    }
+    return {
+      ...item,
+      content: "[Delete]",
+      replies: nextReplies,
+    };
+  });
+}
+
+function canDeleteCommentForUser(user, commentUserId, content) {
+  if (content === "[Delete]") {
+    return false;
+  }
+  return user?.role === "admin" || user?.role === "mod" || user?.id === commentUserId;
 }
 
 export default function PostPage({ params: paramsPromise }) {
@@ -38,6 +63,16 @@ export default function PostPage({ params: paramsPromise }) {
   const [voted, setVoted] = useState(null); // null | "up"
   const [commentText, setCommentText] = useState("");
   const [totalCommentCount, setTotalCommentCount] = useState(0);
+
+  function handleCommentTreeUpdate(update) {
+    if (!update) return;
+    if (update.type === "delete" && update.commentId) {
+      setComments((prev) => markCommentDeleted(prev, update.commentId));
+      setTotalCommentCount((value) => Math.max(0, value - 1));
+      return;
+    }
+    setTotalCommentCount((value) => value + 1);
+  }
 
   useEffect(() => {
     if (!post_id) return;
@@ -248,7 +283,7 @@ export default function PostPage({ params: paramsPromise }) {
 
           <div className="flex flex-col gap-3">
             {comments.map((c) => (
-              <CommentItem key={c.id} comment={c} depth={0} postId={post_id} onReply={() => setTotalCommentCount((v) => v + 1)} />
+              <CommentItem key={c.id} comment={c} depth={0} postId={post_id} onReply={handleCommentTreeUpdate} />
             ))}
           </div>
 
@@ -266,7 +301,7 @@ export default function PostPage({ params: paramsPromise }) {
   );
 }
 
-/* ── PostImage ───────────────────────────────────────────────── */
+
 function PostImage({ src, alt }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -276,7 +311,7 @@ function PostImage({ src, alt }) {
   return (
     <div className="relative flex w-full justify-center bg-zinc-950">
       {!loaded && (
-        <div className="absolute inset-0 animate-pulse bg-zinc-800" />
+        <div className="absolute inset-0 animate-pulse bg-zinc-800"/>
       )}
       <img
         src={src}
@@ -293,6 +328,8 @@ function PostImage({ src, alt }) {
 
 /* ── CommentItem ─────────────────────────────────────────────── */
 function CommentItem({ comment, depth = 0, postId, onReply }) {
+  const currentUser = useAuthStore((state) => state.user);
+  const [content, setContent] = useState(comment.content);
   const [score, setScore] = useState(comment.likes);
   const [vote, setVote] = useState(null);
   const [repliesVisible, setRepliesVisible] = useState(false);
@@ -303,6 +340,13 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
   const [hasMoreReplies, setHasMoreReplies] = useState(true);
   const [showReply, setShowReply] = useState(false);
   const [replyText, setReplyText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const canDeleteComment = canDeleteCommentForUser(currentUser, comment.userId, content);
+
+  useEffect(() => {
+    setContent(comment.content);
+  }, [comment.content]);
 
   function castVote(dir) {
     setVote((prev) => {
@@ -350,6 +394,41 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
     setRepliesVisible(true);
   }
 
+  async function handleDeleteComment() {
+    if (!canDeleteComment || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await api.deleteComment(comment.id);
+      setContent("[Delete]");
+      onReply?.({ type: "delete", commentId: comment.id });
+    } catch {
+      // leave current UI unchanged when delete fails
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  function handleCommentUpdate(update) {
+    if (update?.type === "delete" && update.commentId) {
+      setReplies((prev) => markCommentDeleted(prev, update.commentId));
+    }
+    onReply?.(update);
+  }
+
+  async function handleSubmitReply() {
+    try {
+      const reply = await api.createComment({ post_id: postId, body: replyText.trim(), parent_id: comment.id });
+      const normalized = normalizeComment(reply);
+      setReplies((prev) => [normalized, ...prev]);
+      setRepliesVisible(true);
+      setRepliesInitialized(true);
+      setReplyOffset((v) => v + 1);
+      onReply?.(normalized);
+    } catch {}
+    setShowReply(false);
+    setReplyText("");
+  }
+
   return (
     <div>
       {/* Comment body */}
@@ -368,13 +447,13 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
                 href={`/profile/${comment.author.id}`}
                 className="text-xs font-semibold text-zinc-300 transition-colors hover:text-zinc-100"
               >
-                {comment.author.username}
+                @{comment.author.username}
               </Link>
               <span className="text-xs text-zinc-600">{timeAgo(comment.createdAt)}</span>
             </div>
-
+            
             {/* Content */}
-            <p className="mt-1 text-sm leading-relaxed text-zinc-400">{comment.content}</p>
+            <p className="mt-1 text-sm leading-relaxed text-zinc-400">{content}</p>
 
             {/* Action row */}
             <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -415,6 +494,17 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
                 <Reply size={11} /> Reply
               </button>
 
+              {canDeleteComment && (
+                <button
+                  onClick={handleDeleteComment}
+                  disabled={isDeleting}
+                  className="flex items-center gap-1 text-xs text-red-400/80 transition-colors hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 size={11} />
+                  {isDeleting ? "Deleting..." : "Delete"}
+                </button>
+              )}
+
               {/* Load / hide replies */}
               {!(repliesInitialized && replies.length === 0 && !repliesLoading) && (
                 <button
@@ -442,19 +532,7 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
                 />
                 {replyText.trim() && (
                   <button
-                    onClick={async () => {
-                      try {
-                        const reply = await api.createComment({ post_id: postId, body: replyText.trim(), parent_id: comment.id });
-                        const normalized = normalizeComment(reply);
-                        setReplies((prev) => [normalized, ...prev]);
-                        setRepliesVisible(true);
-                        setRepliesInitialized(true);
-                        setReplyOffset((v) => v + 1);
-                        onReply?.(normalized);
-                      } catch {}
-                      setShowReply(false);
-                      setReplyText("");
-                    }}
+                    onClick={handleSubmitReply}
                     className="shrink-0 rounded-md bg-zinc-100 px-2.5 py-1.5 text-xs font-medium text-zinc-950 transition-colors hover:bg-white"
                   >
                     Reply
@@ -476,7 +554,7 @@ function CommentItem({ comment, depth = 0, postId, onReply }) {
       {repliesVisible && replies.length > 0 && (
         <div className="ml-4 mt-1.5 flex flex-col gap-1.5 border-l border-zinc-800 pl-2">
           {replies.map((r) => (
-            <CommentItem key={r.id} comment={r} depth={depth + 1} postId={postId} onReply={onReply} />
+            <CommentItem key={r.id} comment={r} depth={depth + 1} postId={postId} onReply={handleCommentUpdate} />
           ))}
           {hasMoreReplies && (
             <button
