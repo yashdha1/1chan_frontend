@@ -161,8 +161,11 @@ export default function ProfilePage({ params: paramsPromise }) {
 }
 
 function EditModal({ profile, onClose, onSaved }) {
-  const [form, setForm] = useState({ bio: profile.bio ?? "", avatar: profile.avatar ?? "" });
+  const [form, setForm] = useState({ username: profile.username ?? "", bio: profile.bio ?? "", avatar: profile.avatar ?? "" });
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [error, setError] = useState("");
 
   function handleChange(e) {
@@ -170,15 +173,64 @@ function EditModal({ profile, onClose, onSaved }) {
     setError("");
   }
 
+  useEffect(() => () => {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+  }, [avatarPreview]);
+
+  function handleAvatarFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Choose an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Avatar image must be at most 5 MB.");
+      return;
+    }
+
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+    setError("");
+  }
+
+  function clearAvatar() {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarPreview("");
+    setAvatarFile(null);
+    setForm((p) => ({ ...p, avatar: "" }));
+    setError("");
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!form.username.trim()) {
+      setError("Username is required.");
+      return;
+    }
     setIsLoading(true);
     setError("");
     try {
-      const updated = await api.updateProfile({ bio: form.bio.trim(), avatar: form.avatar.trim() });
+      let avatarUrl = form.avatar.trim();
+
+      if (avatarFile) {
+        setIsUploadingAvatar(true);
+        const upload = await uploadToCloudinary(avatarFile, profile.id ?? crypto.randomUUID());
+        avatarUrl = upload.secure_url ?? upload.url ?? avatarUrl;
+      }
+
+      const updated = await api.updateProfile({
+        username: form.username.trim(),
+        bio: form.bio.trim(),
+        avatar: avatarUrl,
+      });
       onSaved(updated);
     } catch (e) {
       setError(e.message ?? "Failed to save.");
+    } finally {
+      setIsUploadingAvatar(false);
       setIsLoading(false);
     }
   }
@@ -198,8 +250,21 @@ function EditModal({ profile, onClose, onSaved }) {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 px-5 py-5">
           <div className="flex items-center gap-3">
-            <Avatar src={form.avatar || null} username={profile.username} size="lg" />
-            <p className="text-sm font-medium text-zinc-300">{profile.username}</p>
+            <Avatar src={avatarPreview || form.avatar || null} username={form.username || profile.username} size="lg" />
+            <p className="text-sm font-medium text-zinc-300">{form.username || profile.username}</p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="profile-username" className="text-xs text-zinc-500">Username</label>
+            <input
+              id="profile-username"
+              name="username"
+              type="text"
+              value={form.username}
+              onChange={handleChange}
+              placeholder="username"
+              className={AUTH_FIELD_CLASS}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -216,16 +281,19 @@ function EditModal({ profile, onClose, onSaved }) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="profile-avatar" className="text-xs text-zinc-500">Avatar URL</label>
+            <label htmlFor="profile-avatar" className="text-xs text-zinc-500">Avatar image (optional, max 5 MB)</label>
             <input
               id="profile-avatar"
-              name="avatar"
-              type="url"
-              value={form.avatar}
-              onChange={handleChange}
-              placeholder="https://example.com/avatar.png"
+              type="file"
+              accept="image/*"
+              onChange={handleAvatarFileChange}
               className={AUTH_FIELD_CLASS}
             />
+            {(avatarPreview || form.avatar) && (
+              <button type="button" onClick={clearAvatar} className="w-fit text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline">
+                Remove avatar
+              </button>
+            )}
           </div>
 
           {error && <p className="text-xs text-red-400">{error}</p>}
@@ -236,10 +304,10 @@ function EditModal({ profile, onClose, onSaved }) {
             </button>
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || isUploadingAvatar}
               className={`${AUTH_PRIMARY_BUTTON_CLASS} disabled:opacity-60 disabled:cursor-not-allowed`}
             >
-              {isLoading ? "Saving…" : "Save"}
+              {isUploadingAvatar ? "Uploading avatar..." : isLoading ? "Saving..." : "Save"}
             </button>
           </div>
         </form>
